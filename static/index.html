@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Exportar geocercas por polígono - Cesetti</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="zoneExportRoot">
+  <div class="center-msg" id="standaloneMsg">Esta página está pensada para abrirse como Add-In dentro de MyGeotab.</div>
+
+  <div id="app" style="display:none">
+
+    <section class="panel">
+      <h2>1. Dibujá el polígono (4 esquinas)</h2>
+      <div class="toolbar">
+        <button id="drawBtn" type="button">Dibujar nuevo polígono</button>
+        <span class="hint" id="drawHint">Hacé clic en "Dibujar nuevo polígono" y después marcá 4 puntos en el mapa.</span>
+      </div>
+      <div id="zoneMap"></div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Filtro por tipo de zona</h2>
+      <div class="toolbar">
+        <button id="selectAllTypesBtn" type="button">Seleccionar todos</button>
+        <button id="selectNoneTypesBtn" type="button">Ninguno</button>
+        <span class="hint" id="zoneTypesHint">Cargando tipos de zona...</span>
+      </div>
+      <div id="zoneTypeList" class="chip-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3. Buscar geocercas dentro del polígono</h2>
+      <button id="searchBtn" type="button" disabled>Buscar geocercas</button>
+      <span class="hint" id="searchStatus">Completá el polígono para habilitar la búsqueda.</span>
+
+      <div id="zoneResultsWrap" style="display:none">
+        <div class="toolbar">
+          <button id="selectAllZonesBtn" type="button">Seleccionar todas</button>
+          <button id="selectNoneZonesBtn" type="button">Ninguna</button>
+          <span class="hint" id="zoneCountHint"></span>
+        </div>
+        <div id="zoneList" class="zone-list"></div>
+
+        <div class="toolbar">
+          <button id="exportJsonBtn" type="button">Descargar JSON</button>
+          <button id="exportGeoJsonBtn" type="button">Descargar GeoJSON</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
