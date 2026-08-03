@@ -9,7 +9,9 @@ geotab.addin.zoneExport = function (elt, service) {
   var corners = [];          // [{lat, lng}, ...] up to MAX_CORNERS
   var cornerMarkers = [];    // canvas circle elements, same order as corners
   var polygonLayer = null;   // canvas path element for the corner polygon
-  var centerCrosshair = null;
+  var pointerCrosshair = null;
+  var lastPointer = null;    // {lat, lng} of the last known cursor position over the map
+  var pointerRedrawPending = false;
 
   var zoneTypesById = {};
   var matchedZones = [];
@@ -71,21 +73,24 @@ geotab.addin.zoneExport = function (elt, service) {
     return { lat: sumLat / pts.length, lng: sumLng / pts.length };
   }
 
-  function boundsCenter(bounds) {
-    return {
-      lat: (bounds.ne.lat + bounds.sw.lat) / 2,
-      lng: (bounds.ne.lng + bounds.sw.lng) / 2
-    };
+  // ---- Pointer crosshair (tracks the cursor over the map so clicks can drop a corner) ---
+
+  function redrawPointerCrosshair() {
+    if (pointerCrosshair) {
+      pointerCrosshair.remove();
+      pointerCrosshair = null;
+    }
+    if (!lastPointer) return;
+    pointerCrosshair = service.canvas.circle({ lat: lastPointer.lat, lng: lastPointer.lng }, 6, 90)
+      .change({ fill: 'rgba(220,20,60,0.25)', stroke: '#dc143c', 'stroke-width': 2, r: 6 });
   }
 
-  // ---- Center crosshair (tracks map center so the user can "aim" a corner) ---
-
-  function updateCrosshair() {
-    service.map.getBounds().then(function (bounds) {
-      var c = boundsCenter(bounds);
-      if (centerCrosshair) centerCrosshair.remove();
-      centerCrosshair = service.canvas.circle({ lat: c.lat, lng: c.lng }, 6, 80)
-        .change({ fill: 'rgba(220,20,60,0.25)', stroke: '#dc143c', 'stroke-width': 2, r: 6 });
+  function schedulePointerCrosshairRedraw() {
+    if (pointerRedrawPending) return;
+    pointerRedrawPending = true;
+    requestAnimationFrame(function () {
+      pointerRedrawPending = false;
+      redrawPointerCrosshair();
     });
   }
 
@@ -147,15 +152,14 @@ geotab.addin.zoneExport = function (elt, service) {
       });
   }
 
-  function addCornerHere() {
+  function addCornerAtPointer() {
     if (corners.length >= MAX_CORNERS) return;
-    service.map.getBounds().then(function (bounds) {
-      corners.push(boundsCenter(bounds));
-      renderCorners();
-      redrawCornerMarkers();
-      redrawPolygonOutline();
-      clearResults();
-    });
+    if (!lastPointer) return; // cursor hasn't moved over the map yet
+    corners.push({ lat: lastPointer.lat, lng: lastPointer.lng });
+    renderCorners();
+    redrawCornerMarkers();
+    redrawPolygonOutline();
+    clearResults();
   }
 
   function removeCorner(index) {
@@ -407,7 +411,7 @@ geotab.addin.zoneExport = function (elt, service) {
 
   // ---- Wiring ------------------------------------------------------------
 
-  $('addCornerBtn').addEventListener('click', addCornerHere);
+  $('addCornerBtn').addEventListener('click', addCornerAtPointer);
   $('resetBtn').addEventListener('click', resetPolygon);
   $('searchBtn').addEventListener('click', runSearch);
   $('selectAllZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(true); });
@@ -415,8 +419,17 @@ geotab.addin.zoneExport = function (elt, service) {
   $('exportKmlBtn').addEventListener('click', exportKml);
   $('copyKmlBtn').addEventListener('click', copyKml);
 
-  service.map.attach('changed', updateCrosshair);
+  // The map API doesn't fire 'click' with coordinates for empty map area, only for
+  // entities (zone/device/route/...). So we track the cursor position continuously via
+  // 'move' (coordinates in map space: x = lng, y = lat) and use the last known position
+  // whenever a 'click' arrives, regardless of what (if anything) was clicked on.
+  service.events.attach('move', function (e) {
+    lastPointer = { lat: e.y, lng: e.x };
+    schedulePointerCrosshairRedraw();
+  });
+  service.events.attach('click', function () {
+    addCornerAtPointer();
+  });
 
   renderCorners();
-  updateCrosshair();
 };
