@@ -2,60 +2,55 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<title>Exportar geocercas por polígono - Cesetti</title>
+<title>Exportar geocercas por polígono</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="zoneExportRoot">
-  <div class="center-msg" id="standaloneMsg">Esta página está pensada para abrirse como Add-In dentro de MyGeotab.</div>
+<div id="app">
 
-  <div id="app" style="display:none">
+  <section class="panel">
+    <h2>1. Definí el polígono (4 esquinas)</h2>
+    <p class="hint">Centrá en el mapa el punto que querés usar como esquina (círculo rojo = centro actual) y confirmalo. Repetí 4 veces. El círculo se actualiza al soltar el mapa después de mover/hacer zoom.</p>
+    <div class="toolbar">
+      <button id="addCornerBtn" type="button">Fijar esquina aquí</button>
+      <button id="resetBtn" type="button">Reiniciar polígono</button>
+    </div>
+    <div id="cornerList" class="corner-list"></div>
+    <p class="hint" id="polygonHint">Esquinas: 0 / 4</p>
+  </section>
 
-    <section class="panel">
-      <h2>1. Dibujá el polígono (4 esquinas)</h2>
-      <div class="toolbar">
-        <button id="drawBtn" type="button">Dibujar nuevo polígono</button>
-        <span class="hint" id="drawHint">Hacé clic en "Dibujar nuevo polígono" y después marcá 4 puntos en el mapa.</span>
-      </div>
-      <div id="zoneMap"></div>
-    </section>
+  <section class="panel">
+    <h2>2. Buscar geocercas</h2>
+    <button id="searchBtn" type="button" disabled>Buscar geocercas en el polígono</button>
+    <p class="hint" id="searchStatus">Completá el polígono para habilitar la búsqueda.</p>
+  </section>
 
-    <section class="panel">
-      <h2>2. Filtro por tipo de zona</h2>
-      <div class="toolbar">
-        <button id="selectAllTypesBtn" type="button">Seleccionar todos</button>
-        <button id="selectNoneTypesBtn" type="button">Ninguno</button>
-        <span class="hint" id="zoneTypesHint">Cargando tipos de zona...</span>
-      </div>
-      <div id="zoneTypeList" class="chip-list"></div>
-    </section>
+  <section class="panel" id="resultsSection" style="display:none">
+    <h2>3. Resultados</h2>
 
-    <section class="panel">
-      <h2>3. Buscar geocercas dentro del polígono</h2>
-      <button id="searchBtn" type="button" disabled>Buscar geocercas</button>
-      <span class="hint" id="searchStatus">Completá el polígono para habilitar la búsqueda.</span>
+    <div class="subhead">Tipos de zona encontrados</div>
+    <div id="zoneTypeList" class="chip-list"></div>
 
-      <div id="zoneResultsWrap" style="display:none">
-        <div class="toolbar">
-          <button id="selectAllZonesBtn" type="button">Seleccionar todas</button>
-          <button id="selectNoneZonesBtn" type="button">Ninguna</button>
-          <span class="hint" id="zoneCountHint"></span>
-        </div>
-        <div id="zoneList" class="zone-list"></div>
+    <div class="subhead" id="zoneCountHint">Geocercas encontradas</div>
+    <div class="toolbar">
+      <button id="selectAllZonesBtn" type="button">Seleccionar todas</button>
+      <button id="selectNoneZonesBtn" type="button">Ninguna</button>
+    </div>
+    <div id="zoneList" class="zone-list"></div>
+  </section>
 
-        <div class="toolbar">
-          <button id="exportJsonBtn" type="button">Descargar JSON</button>
-          <button id="exportGeoJsonBtn" type="button">Descargar GeoJSON</button>
-        </div>
-      </div>
-    </section>
+  <section class="panel" id="exportSection" style="display:none">
+    <h2>4. Exportar KML</h2>
+    <div class="toolbar">
+      <button id="exportKmlBtn" type="button">Descargar KML</button>
+      <button id="copyKmlBtn" type="button">Copiar KML</button>
+    </div>
+    <p class="hint" id="exportStatus"></p>
+    <textarea id="kmlOutput" rows="8" readonly style="display:none" placeholder="El KML generado aparece acá si la descarga automática no funciona (el panel del mapa corre en un iframe con permisos limitados). Podés seleccionar todo y copiarlo a mano."></textarea>
+  </section>
 
-  </div>
 </div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
