@@ -1,24 +1,21 @@
-geotab.addin.zoneExport = function () {
+geotab.addin.zoneExport = function (elt, service) {
   'use strict';
 
   var MAX_CORNERS = 4;
   var ZONE_RESULTS_LIMIT = 1000;
 
-  var currentApi = null;
-  var map = null;
-  var mapReady = false;
+  function $(id) { return elt.querySelector('#' + id); }
 
-  var corners = [];        // [{lat, lng}, ...] up to MAX_CORNERS
-  var cornerMarkers = [];  // Leaflet markers, same order as corners
-  var polygonLayer = null;
-  var resultsLayerGroup = null;
-  var drawing = false;
+  var corners = [];          // [{lat, lng}, ...] up to MAX_CORNERS
+  var cornerMarkers = [];    // canvas circle elements, same order as corners
+  var polygonLayer = null;   // canvas path element for the corner polygon
+  var centerCrosshair = null;
 
   var zoneTypesById = {};
-  var zoneTypesLoaded = false;
   var matchedZones = [];
+  var resultZoneLayers = []; // canvas path elements for matched-zone overlays
 
-  function $(id) { return document.getElementById(id); }
+  // ---- Helpers --------------------------------------------------------
 
   function downloadBlob(filename, mimeType, content) {
     var blob = new Blob([content], { type: mimeType });
@@ -36,100 +33,12 @@ geotab.addin.zoneExport = function () {
     return new Date().toISOString().replace(/[:.]/g, '-');
   }
 
-  // ---- Map / polygon drawing ----------------------------------------
-
-  function initMap() {
-    if (mapReady) return;
-    map = L.map('zoneMap', { worldCopyJump: true }).setView([20, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap',
-      maxZoom: 19
-    }).addTo(map);
-    resultsLayerGroup = L.layerGroup().addTo(map);
-    map.on('click', onMapClick);
-    mapReady = true;
+  function escapeXml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
-
-  function cornerIcon(index) {
-    return L.divIcon({
-      className: '',
-      html: '<div class="corner-marker">' + (index + 1) + '</div>',
-      iconSize: [22, 22],
-      iconAnchor: [11, 11]
-    });
-  }
-
-  function onMapClick(e) {
-    if (!drawing || corners.length >= MAX_CORNERS) return;
-    addCorner(e.latlng);
-  }
-
-  function addCorner(latlng) {
-    var index = corners.length;
-    corners.push({ lat: latlng.lat, lng: latlng.lng });
-
-    var marker = L.marker(latlng, { draggable: true, icon: cornerIcon(index) }).addTo(map);
-    marker.on('drag', function () {
-      var ll = marker.getLatLng();
-      corners[index] = { lat: ll.lat, lng: ll.lng };
-      redrawPolygon();
-      invalidateResults('El polígono cambió, volvé a buscar geocercas.');
-    });
-    cornerMarkers.push(marker);
-
-    redrawPolygon();
-
-    if (corners.length === MAX_CORNERS) {
-      drawing = false;
-      $('drawHint').textContent = 'Polígono completo. Podés arrastrar las esquinas para ajustarlo.';
-      $('searchBtn').disabled = !zoneTypesLoaded;
-    } else {
-      $('drawHint').textContent = 'Marcá ' + (MAX_CORNERS - corners.length) + ' punto(s) más.';
-    }
-  }
-
-  function redrawPolygon() {
-    if (polygonLayer) {
-      map.removeLayer(polygonLayer);
-      polygonLayer = null;
-    }
-    if (corners.length < 2) return;
-    var latlngs = corners.map(function (p) { return [p.lat, p.lng]; });
-    var complete = corners.length === MAX_CORNERS;
-    polygonLayer = L.polygon(latlngs, {
-      color: '#2f6fed',
-      weight: 2,
-      dashArray: complete ? null : '6 4',
-      fillOpacity: complete ? 0.12 : 0.05
-    }).addTo(map);
-  }
-
-  function resetPolygon() {
-    cornerMarkers.forEach(function (m) { map.removeLayer(m); });
-    cornerMarkers = [];
-    corners = [];
-    if (polygonLayer) {
-      map.removeLayer(polygonLayer);
-      polygonLayer = null;
-    }
-    drawing = true;
-    $('drawHint').textContent = 'Marcá 4 puntos en el mapa para definir el polígono.';
-    $('searchBtn').disabled = true;
-    resultsLayerGroup.clearLayers();
-    matchedZones = [];
-    $('zoneResultsWrap').style.display = 'none';
-    $('searchStatus').textContent = 'Completá el polígono para habilitar la búsqueda.';
-  }
-
-  function invalidateResults(message) {
-    matchedZones = [];
-    resultsLayerGroup.clearLayers();
-    $('zoneResultsWrap').style.display = 'none';
-    $('searchStatus').textContent = message;
-    $('searchBtn').disabled = !zoneTypesLoaded || corners.length !== MAX_CORNERS;
-  }
-
-  // ---- Geometry helpers -----------------------------------------------
 
   function computeBoundingBox(points) {
     var lats = points.map(function (p) { return p.lat; });
@@ -162,93 +71,198 @@ geotab.addin.zoneExport = function () {
     return { lat: sumLat / pts.length, lng: sumLng / pts.length };
   }
 
-  // ---- Zone type filter -------------------------------------------------
+  function boundsCenter(bounds) {
+    return {
+      lat: (bounds.ne.lat + bounds.sw.lat) / 2,
+      lng: (bounds.ne.lng + bounds.sw.lng) / 2
+    };
+  }
 
-  function loadZoneTypes() {
-    $('zoneTypesHint').textContent = 'Cargando tipos de zona...';
-    currentApi.call('Get', { typeName: 'ZoneType' }, function (zoneTypes) {
-      zoneTypesById = {};
-      zoneTypes.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
-      var list = $('zoneTypeList');
-      list.innerHTML = '';
-      zoneTypes.forEach(function (zt) {
-        zoneTypesById[zt.id] = zt;
-        var label = document.createElement('label');
-        label.className = 'chip';
-        var input = document.createElement('input');
-        input.type = 'checkbox';
-        input.checked = true;
-        input.value = zt.id;
-        label.appendChild(input);
-        label.appendChild(document.createTextNode(zt.name || zt.id));
-        list.appendChild(label);
-      });
-      zoneTypesLoaded = true;
-      $('zoneTypesHint').textContent = zoneTypes.length + ' tipo(s) de zona disponibles.';
-      $('searchBtn').disabled = corners.length !== MAX_CORNERS;
-    }, function (error) {
-      $('zoneTypesHint').textContent = 'Error al cargar tipos de zona: ' + (error && error.message || error);
+  // ---- Center crosshair (tracks map center so the user can "aim" a corner) ---
+
+  function updateCrosshair() {
+    service.map.getBounds().then(function (bounds) {
+      var c = boundsCenter(bounds);
+      if (centerCrosshair) centerCrosshair.remove();
+      centerCrosshair = service.canvas.circle({ lat: c.lat, lng: c.lng }, 6, 80)
+        .change({ fill: 'rgba(220,20,60,0.25)', stroke: '#dc143c', 'stroke-width': 2, r: 6 });
     });
   }
 
-  function getSelectedZoneTypeIds() {
-    var checkboxes = $('zoneTypeList').querySelectorAll('input[type=checkbox]');
-    var selected = [];
-    Array.prototype.forEach.call(checkboxes, function (cb) { if (cb.checked) selected.push(cb.value); });
-    return selected;
+  // ---- Polygon corners --------------------------------------------------
+
+  function renderCorners() {
+    var list = $('cornerList');
+    list.innerHTML = '';
+    corners.forEach(function (c, i) {
+      var row = document.createElement('div');
+      row.className = 'corner-row';
+
+      var label = document.createElement('span');
+      label.textContent = (i + 1) + '. ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
+      row.appendChild(label);
+
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'mini-btn';
+      removeBtn.textContent = 'Quitar';
+      removeBtn.addEventListener('click', function () { removeCorner(i); });
+      row.appendChild(removeBtn);
+
+      list.appendChild(row);
+    });
+
+    $('polygonHint').textContent = 'Esquinas: ' + corners.length + ' / ' + MAX_CORNERS;
+    $('addCornerBtn').disabled = corners.length >= MAX_CORNERS;
+    $('searchBtn').disabled = corners.length !== MAX_CORNERS;
   }
 
-  function setAllZoneTypeCheckboxes(checked) {
-    var checkboxes = $('zoneTypeList').querySelectorAll('input[type=checkbox]');
-    Array.prototype.forEach.call(checkboxes, function (cb) { cb.checked = checked; });
+  function redrawCornerMarkers() {
+    cornerMarkers.forEach(function (m) { m.remove(); });
+    cornerMarkers = corners.map(function (c) {
+      return service.canvas.circle({ lat: c.lat, lng: c.lng }, 8, 60)
+        .change({ fill: '#2f6fed', stroke: '#fff', 'stroke-width': 2, r: 8 });
+    });
+  }
+
+  function redrawPolygonOutline() {
+    if (polygonLayer) {
+      polygonLayer.remove();
+      polygonLayer = null;
+    }
+    if (corners.length < 2) return;
+
+    var segs = corners.map(function (c, i) {
+      return { type: i === 0 ? 'M' : 'L', points: [{ lat: c.lat, lng: c.lng }] };
+    });
+    segs.push({ type: 'Z' });
+
+    var complete = corners.length === MAX_CORNERS;
+    polygonLayer = service.canvas.path(segs, 40)
+      .change({
+        fill: '#2f6fed',
+        stroke: '#2f6fed',
+        'stroke-width': 2,
+        'fill-opacity': complete ? 0.12 : 0.03
+      });
+  }
+
+  function addCornerHere() {
+    if (corners.length >= MAX_CORNERS) return;
+    service.map.getBounds().then(function (bounds) {
+      corners.push(boundsCenter(bounds));
+      renderCorners();
+      redrawCornerMarkers();
+      redrawPolygonOutline();
+      clearResults();
+    });
+  }
+
+  function removeCorner(index) {
+    corners.splice(index, 1);
+    renderCorners();
+    redrawCornerMarkers();
+    redrawPolygonOutline();
+    clearResults();
+  }
+
+  function resetPolygon() {
+    corners = [];
+    renderCorners();
+    redrawCornerMarkers();
+    redrawPolygonOutline();
+    clearResults();
   }
 
   // ---- Search -------------------------------------------------------------
 
+  function clearResults() {
+    resultZoneLayers.forEach(function (l) { l.remove(); });
+    resultZoneLayers = [];
+    matchedZones = [];
+    $('resultsSection').style.display = 'none';
+    $('exportSection').style.display = 'none';
+    $('searchStatus').textContent = corners.length === MAX_CORNERS
+      ? 'Listo para buscar.'
+      : 'Completá el polígono para habilitar la búsqueda.';
+  }
+
   function runSearch() {
     if (corners.length !== MAX_CORNERS) return;
 
-    var selectedIds = getSelectedZoneTypeIds();
-    var totalTypes = Object.keys(zoneTypesById).length;
-
-    if (totalTypes > 0 && selectedIds.length === 0) {
-      $('searchStatus').textContent = 'Seleccioná al menos un tipo de zona.';
-      return;
-    }
+    $('searchStatus').textContent = 'Buscando geocercas...';
+    resultZoneLayers.forEach(function (l) { l.remove(); });
+    resultZoneLayers = [];
+    matchedZones = [];
+    $('resultsSection').style.display = 'none';
+    $('exportSection').style.display = 'none';
 
     var bbox = computeBoundingBox(corners);
-    var search = {
-      searchArea: { top: bbox.top, bottom: bbox.bottom, left: bbox.left, right: bbox.right }
-    };
-    if (selectedIds.length > 0 && selectedIds.length < totalTypes) {
-      search.zoneTypes = selectedIds.map(function (id) { return { id: id }; });
-    }
 
-    $('searchStatus').textContent = 'Buscando geocercas...';
-    $('zoneResultsWrap').style.display = 'none';
+    var zoneTypesPromise = Object.keys(zoneTypesById).length
+      ? Promise.resolve()
+      : service.api.call('Get', { typeName: 'ZoneType' }).then(function (types) {
+          types.forEach(function (zt) { zoneTypesById[zt.id] = zt; });
+        });
 
-    currentApi.call('Get', {
+    var zonesPromise = service.api.call('Get', {
       typeName: 'Zone',
-      search: search,
+      search: {
+        searchArea: { top: bbox.top, bottom: bbox.bottom, left: bbox.left, right: bbox.right }
+      },
       resultsLimit: ZONE_RESULTS_LIMIT
-    }, function (zones) {
-      var inPolygon = zones.filter(function (z) {
+    });
+
+    Promise.all([zoneTypesPromise, zonesPromise]).then(function (results) {
+      var zones = results[1];
+      matchedZones = zones.filter(function (z) {
         var c = zoneCentroid(z);
         return c && pointInPolygon(c.lat, c.lng, corners);
       });
-      matchedZones = inPolygon;
       renderResults(zones.length);
-    }, function (error) {
+    }).catch(function (error) {
       $('searchStatus').textContent = 'Error al buscar geocercas: ' + (error && error.message || error);
     });
   }
 
-  function renderResults(bboxMatchCount) {
-    resultsLayerGroup.clearLayers();
+  function typeIdsOf(zone) {
+    return (zone.zoneTypes && zone.zoneTypes.length)
+      ? zone.zoneTypes.map(function (zt) { return zt.id; })
+      : ['__none__'];
+  }
+
+  function typeName(typeId) {
+    if (typeId === '__none__') return 'Sin tipo';
+    var full = zoneTypesById[typeId];
+    return full ? full.name : typeId;
+  }
+
+  function renderResults(bboxCount) {
+    var typeIdsPresent = {};
+    matchedZones.forEach(function (zone) {
+      typeIdsOf(zone).forEach(function (id) { typeIdsPresent[id] = true; });
+    });
+
+    var chipList = $('zoneTypeList');
+    chipList.innerHTML = '';
+    Object.keys(typeIdsPresent).sort(function (a, b) {
+      return typeName(a).localeCompare(typeName(b));
+    }).forEach(function (typeId) {
+      var label = document.createElement('label');
+      label.className = 'chip';
+      var input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = true;
+      input.addEventListener('change', function () {
+        toggleZonesByType(typeId, input.checked);
+      });
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(typeName(typeId)));
+      chipList.appendChild(label);
+    });
 
     var list = $('zoneList');
     list.innerHTML = '';
-
     matchedZones.forEach(function (zone, index) {
       var row = document.createElement('div');
       row.className = 'zone-row';
@@ -257,6 +271,7 @@ geotab.addin.zoneExport = function () {
       checkbox.type = 'checkbox';
       checkbox.checked = true;
       checkbox.dataset.index = String(index);
+      checkbox.dataset.typeIds = typeIdsOf(zone).join(',');
       row.appendChild(checkbox);
 
       var info = document.createElement('div');
@@ -265,31 +280,44 @@ geotab.addin.zoneExport = function () {
       nameEl.textContent = zone.name || '(sin nombre)';
       info.appendChild(nameEl);
 
-      var typeNames = (zone.zoneTypes || []).map(function (zt) {
-        var full = zoneTypesById[zt.id];
-        return full ? full.name : zt.id;
-      }).join(', ');
       var metaEl = document.createElement('div');
       metaEl.className = 'zone-meta';
-      metaEl.textContent = typeNames || 'Sin tipo';
+      metaEl.textContent = typeIdsOf(zone).map(typeName).join(', ');
       info.appendChild(metaEl);
 
       row.appendChild(info);
       list.appendChild(row);
 
-      var latlngs = (zone.points || []).map(function (p) { return [p.y, p.x]; });
+      var latlngs = (zone.points || []).map(function (p) { return { lat: p.y, lng: p.x }; });
       if (latlngs.length >= 3) {
-        L.polygon(latlngs, { color: '#e0722d', weight: 1, fillOpacity: 0.15 }).addTo(resultsLayerGroup);
+        var segs = latlngs.map(function (pt, i) { return { type: i === 0 ? 'M' : 'L', points: [pt] }; });
+        segs.push({ type: 'Z' });
+        resultZoneLayers.push(
+          service.canvas.path(segs, 20)
+            .change({ fill: '#e0722d', stroke: '#e0722d', 'stroke-width': 1, 'fill-opacity': 0.15 })
+        );
       }
     });
 
     var statusMsg = matchedZones.length + ' geocerca(s) dentro del polígono.';
-    if (bboxMatchCount >= ZONE_RESULTS_LIMIT) {
-      statusMsg += ' Atención: se alcanzó el límite de ' + ZONE_RESULTS_LIMIT + ' resultados en el área rectangular de búsqueda; puede haber más geocercas de las mostradas. Achicá el polígono para asegurar cobertura completa.';
+    if (bboxCount >= ZONE_RESULTS_LIMIT) {
+      statusMsg += ' Atención: se alcanzó el límite de ' + ZONE_RESULTS_LIMIT + ' resultados en el área rectangular de búsqueda; puede haber más geocercas de las mostradas. Achicá el polígono.';
     }
     $('searchStatus').textContent = statusMsg;
-    $('zoneCountHint').textContent = matchedZones.length + ' geocerca(s) encontradas';
-    $('zoneResultsWrap').style.display = matchedZones.length > 0 ? 'block' : 'none';
+    $('zoneCountHint').textContent = 'Geocercas encontradas (' + matchedZones.length + ')';
+
+    $('resultsSection').style.display = 'block';
+    $('exportSection').style.display = matchedZones.length > 0 ? 'block' : 'none';
+    $('kmlOutput').style.display = 'none';
+    $('kmlOutput').value = '';
+    $('exportStatus').textContent = '';
+  }
+
+  function toggleZonesByType(typeId, checked) {
+    var checkboxes = $('zoneList').querySelectorAll('input[type=checkbox]');
+    Array.prototype.forEach.call(checkboxes, function (cb) {
+      if (cb.dataset.typeIds.split(',').indexOf(typeId) !== -1) cb.checked = checked;
+    });
   }
 
   function getSelectedZones() {
@@ -302,109 +330,93 @@ geotab.addin.zoneExport = function () {
   }
 
   function setAllZoneCheckboxes(checked) {
-    var checkboxes = $('zoneList').querySelectorAll('input[type=checkbox]');
-    Array.prototype.forEach.call(checkboxes, function (cb) { cb.checked = checked; });
+    Array.prototype.forEach.call($('zoneList').querySelectorAll('input[type=checkbox]'), function (cb) { cb.checked = checked; });
+    Array.prototype.forEach.call($('zoneTypeList').querySelectorAll('input[type=checkbox]'), function (cb) { cb.checked = checked; });
   }
 
-  // ---- Export ---------------------------------------------------------------
+  // ---- KML export -------------------------------------------------------
 
-  function exportJson() {
-    var selected = getSelectedZones();
-    if (!selected.length) {
-      $('searchStatus').textContent = 'Seleccioná al menos una geocerca para exportar.';
-      return;
-    }
-    var data = selected.map(function (zone) {
-      return {
-        id: zone.id,
-        name: zone.name,
-        comment: zone.comment,
-        externalReference: zone.externalReference,
-        zoneTypes: (zone.zoneTypes || []).map(function (zt) {
-          var full = zoneTypesById[zt.id];
-          return { id: zt.id, name: full ? full.name : null };
-        }),
-        points: zone.points
-      };
-    });
-    downloadBlob('geocercas_poligono_' + timestampSuffix() + '.json', 'application/json', JSON.stringify(data, null, 2));
+  function buildKml(zones) {
+    var placemarks = zones.map(function (zone) {
+      var typeNamesStr = typeIdsOf(zone).map(typeName).join(', ');
+      var coords = (zone.points || []).map(function (p) { return p.x + ',' + p.y + ',0'; }).join(' ');
+      var descLines = 'Tipos de zona: ' + typeNamesStr;
+      if (zone.comment) descLines += '\nComentario: ' + zone.comment;
+
+      return '    <Placemark>\n' +
+        '      <name>' + escapeXml(zone.name || '(sin nombre)') + '</name>\n' +
+        '      <description><![CDATA[' + descLines + ']]></description>\n' +
+        '      <ExtendedData>\n' +
+        '        <Data name="NOMBRE"><value>' + escapeXml(zone.name || '') + '</value></Data>\n' +
+        '        <Data name="ZONETYPES"><value>' + escapeXml(typeNamesStr) + '</value></Data>\n' +
+        '      </ExtendedData>\n' +
+        '      <Polygon><outerBoundaryIs><LinearRing><coordinates>' + coords + '</coordinates></LinearRing></outerBoundaryIs></Polygon>\n' +
+        '    </Placemark>';
+    }).join('\n');
+
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
+      '  <Document>\n' +
+      '    <name>Geocercas exportadas</name>\n' +
+      placemarks + '\n' +
+      '  </Document>\n' +
+      '</kml>\n';
   }
 
-  function exportGeoJson() {
+  function exportKml() {
     var selected = getSelectedZones();
     if (!selected.length) {
-      $('searchStatus').textContent = 'Seleccioná al menos una geocerca para exportar.';
+      $('exportStatus').textContent = 'Seleccioná al menos una geocerca para exportar.';
       return;
     }
-    var featureCollection = {
-      type: 'FeatureCollection',
-      features: selected.map(function (zone) {
-        var typeNames = (zone.zoneTypes || []).map(function (zt) {
-          var full = zoneTypesById[zt.id];
-          return full ? full.name : zt.id;
-        });
-        return {
-          type: 'Feature',
-          properties: {
-            id: zone.id,
-            name: zone.name,
-            comment: zone.comment,
-            zoneTypes: typeNames
-          },
-          geometry: {
-            type: 'Polygon',
-            coordinates: [(zone.points || []).map(function (p) { return [p.x, p.y]; })]
-          }
-        };
-      })
-    };
-    downloadBlob('geocercas_poligono_' + timestampSuffix() + '.geojson', 'application/geo+json', JSON.stringify(featureCollection, null, 2));
+    var kml = buildKml(selected);
+    var kmlOutput = $('kmlOutput');
+    kmlOutput.value = kml;
+    kmlOutput.style.display = 'block';
+    try { kmlOutput.focus(); kmlOutput.select(); } catch (e) { /* ignore */ }
+
+    $('exportStatus').textContent = selected.length + ' geocerca(s) en el KML. Si la descarga automática no se dispara (el panel del mapa corre en un iframe con permisos limitados), copiá el texto de abajo y guardalo como archivo .kml.';
+
+    try {
+      downloadBlob('geocercas_' + timestampSuffix() + '.kml', 'application/vnd.google-earth.kml+xml', kml);
+    } catch (e) {
+      // download blocked by the iframe sandbox — the textarea above is the fallback
+    }
+  }
+
+  function copyKml() {
+    var kmlOutput = $('kmlOutput');
+    if (!kmlOutput.value) {
+      $('exportStatus').textContent = 'Generá el KML primero (Descargar KML).';
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(kmlOutput.value).then(function () {
+        $('exportStatus').textContent = 'KML copiado al portapapeles.';
+      }).catch(function () {
+        kmlOutput.focus();
+        kmlOutput.select();
+        $('exportStatus').textContent = 'No se pudo copiar automáticamente. El texto ya está seleccionado, usá Ctrl+C.';
+      });
+    } else {
+      kmlOutput.focus();
+      kmlOutput.select();
+      $('exportStatus').textContent = 'Seleccioná el texto (ya está resaltado) y copiá con Ctrl+C.';
+    }
   }
 
   // ---- Wiring ------------------------------------------------------------
 
-  function wireEvents() {
-    $('drawBtn').addEventListener('click', resetPolygon);
-    $('searchBtn').addEventListener('click', runSearch);
+  $('addCornerBtn').addEventListener('click', addCornerHere);
+  $('resetBtn').addEventListener('click', resetPolygon);
+  $('searchBtn').addEventListener('click', runSearch);
+  $('selectAllZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(true); });
+  $('selectNoneZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(false); });
+  $('exportKmlBtn').addEventListener('click', exportKml);
+  $('copyKmlBtn').addEventListener('click', copyKml);
 
-    $('selectAllTypesBtn').addEventListener('click', function () { setAllZoneTypeCheckboxes(true); });
-    $('selectNoneTypesBtn').addEventListener('click', function () { setAllZoneTypeCheckboxes(false); });
+  service.map.attach('changed', updateCrosshair);
 
-    $('selectAllZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(true); });
-    $('selectNoneZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(false); });
-
-    $('exportJsonBtn').addEventListener('click', exportJson);
-    $('exportGeoJsonBtn').addEventListener('click', exportGeoJson);
-  }
-
-  var wired = false;
-
-  return {
-    initialize: function (api, state, callback) {
-      currentApi = api;
-      if (!wired) {
-        wireEvents();
-        wired = true;
-      }
-      callback();
-    },
-
-    focus: function (api, state) {
-      currentApi = api;
-      $('standaloneMsg').style.display = 'none';
-      $('app').style.display = 'block';
-
-      initMap();
-      setTimeout(function () { map.invalidateSize(); }, 0);
-
-      if (!zoneTypesLoaded) {
-        loadZoneTypes();
-      }
-    },
-
-    blur: function () {
-      $('app').style.display = 'none';
-      $('standaloneMsg').style.display = 'block';
-    }
-  };
+  renderCorners();
+  updateCrosshair();
 };
