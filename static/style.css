@@ -3,137 +3,109 @@
 body {
   margin: 0;
   font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #222;
   background: #f4f5f7;
 }
 
-.center-msg {
-  padding: 40px;
-  text-align: center;
-  color: #777;
-}
-
 #app {
-  padding: 12px 16px 40px;
-  max-width: 780px;
-  margin: 0 auto;
+  padding: 10px 12px 30px;
 }
 
 .panel {
   background: #fff;
   border: 1px solid #dcdfe3;
   border-radius: 6px;
-  padding: 14px 16px;
-  margin-bottom: 16px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
 }
 
 .panel h2 {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 8px;
+  font-size: 13px;
   font-weight: 600;
 }
 
-label {
-  display: block;
-  margin-top: 8px;
-  margin-bottom: 3px;
+.subhead {
+  margin: 10px 0 4px;
   font-weight: 600;
   color: #555;
+  font-size: 12px;
 }
 
-input, select, textarea {
-  width: 100%;
-  font-family: Consolas, Menlo, monospace;
-  font-size: 12.5px;
-  padding: 6px 8px;
-  border: 1px solid #cbd0d6;
-  border-radius: 4px;
-  background: #fbfbfc;
+.hint {
+  margin: 6px 0 0;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
 }
-
-textarea { resize: vertical; }
 
 button {
-  margin-top: 10px;
-  padding: 7px 14px;
+  padding: 6px 10px;
   border: none;
   border-radius: 4px;
   background: #2f6fed;
   color: #fff;
   font-weight: 600;
+  font-size: 11.5px;
   cursor: pointer;
 }
 
 button:hover { background: #1f56c9; }
-
-.hint {
-  margin-left: 10px;
-  color: #888;
-  font-size: 11.5px;
-}
-
-.result {
-  margin-top: 10px;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 10px 12px;
-  border-radius: 4px;
-  max-height: 340px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.warn {
-  margin-top: 10px;
-  color: #8a6d3b;
-  background: #fcf8e3;
-  border: 1px solid #faebcc;
-  padding: 8px 10px;
-  border-radius: 4px;
-  font-size: 11.5px;
-}
-
-/* --- Zone polygon export --- */
-
-#zoneMap {
-  height: 440px;
-  border: 1px solid #cbd0d6;
-  border-radius: 4px;
-  margin-top: 8px;
-  background: #eef1f6;
-}
+button:disabled { background: #b7c3d6; cursor: default; }
 
 .toolbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 6px;
 }
 
-.toolbar button {
-  margin-top: 0;
+.corner-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+
+.corner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f4f5f7;
+  border: 1px solid #e3e6ea;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 11px;
+}
+
+.mini-btn {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  background: #e3e6ea;
+  color: #333;
+}
+
+.mini-btn:hover { background: #d2d7de; }
 
 .chip-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 5px;
+  margin-top: 4px;
 }
 
 .chip {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: #eef1f6;
   border: 1px solid #cbd0d6;
-  border-radius: 14px;
-  padding: 4px 10px;
+  border-radius: 12px;
+  padding: 3px 8px;
   font-weight: 500;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .chip input {
@@ -142,25 +114,23 @@ button:hover { background: #1f56c9; }
 }
 
 .zone-list {
-  max-height: 320px;
+  max-height: 260px;
   overflow: auto;
   border: 1px solid #dcdfe3;
   border-radius: 4px;
-  margin-top: 10px;
+  margin-top: 6px;
   background: #fbfbfc;
 }
 
 .zone-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid #eee;
 }
 
-.zone-row:last-child {
-  border-bottom: none;
-}
+.zone-row:last-child { border-bottom: none; }
 
 .zone-row input[type="checkbox"] {
   width: auto;
@@ -174,24 +144,18 @@ button:hover { background: #1f56c9; }
 
 .zone-row .zone-meta {
   color: #888;
-  font-size: 11.5px;
+  font-size: 10.5px;
 }
 
-#zoneResultsWrap {
-  margin-top: 12px;
-}
-
-.corner-marker {
-  background: #2f6fed;
-  color: #fff;
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 12px;
-  border: 2px solid #fff;
-  box-shadow: 0 0 3px rgba(0, 0, 0, .5);
+#kmlOutput {
+  width: 100%;
+  margin-top: 8px;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 10.5px;
+  padding: 6px 8px;
+  border: 1px solid #cbd0d6;
+  border-radius: 4px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  resize: vertical;
 }
