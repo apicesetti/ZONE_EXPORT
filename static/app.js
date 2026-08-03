@@ -7,14 +7,14 @@ geotab.addin.zoneExport = function (elt, service) {
   function $(id) { return elt.querySelector('#' + id); }
 
   var corners = [];          // [{lat, lng}, ...], polygon vertices in click order
-  var vertexMarkers = [];    // Leaflet draggable markers, same order as corners
-  var polygonLine = null;    // Leaflet polygon layer for the corner polygon
+  var vertexMarkers = [];    // canvas circle elements (on the real Geotab map), same order as corners
+  var polygonLayer = null;   // canvas path element for the corner polygon
   var drawingActive = false;
-  var leafletMap = null;
+  var selectedIndex = null;  // index of the vertex armed for "move to next click" (drag substitute)
 
   var zoneTypesById = {};
   var matchedZones = [];
-  var resultZoneLayers = []; // canvas path elements (on the real Geotab map) for matched-zone overlays
+  var resultZoneLayers = []; // canvas path elements for matched-zone overlays
 
   // ---- Helpers --------------------------------------------------------
 
@@ -72,120 +72,162 @@ geotab.addin.zoneExport = function (elt, service) {
     return { lat: sumLat / pts.length, lng: sumLng / pts.length };
   }
 
-  // ---- Polygon editor (own embedded Leaflet map — draggable, click-to-add/remove) ----
+  // ---- Polygon editor on the real MyGeotab map ---------------------------
   //
-  // The Geotab map add-in API (service.map / service.events) only exposes screen-pixel
-  // coordinates for clicks/moves over the real MyGeotab map, with no way to convert those
-  // to lat/lng and no drag support on drawn elements. So the interactive polygon editor
-  // runs on our own Leaflet map inside the add-in panel, where we have full mouse control.
-  // The real Geotab map (via service.canvas) is only used afterwards, to show the zones
-  // found inside the finished polygon — that only needs to draw shapes at known lat/lng.
+  // service.events 'click' gives screen-pixel x/y for entity hover/out, but for
+  // clicks it also carries a `location: {lat, lng}` field (confirmed working in
+  // another add-in of this user's). There's no documented drag event on
+  // service.canvas elements, so "dragging" a point is simulated as: click an
+  // existing vertex to arm it, then click the map again to drop it there.
 
-  function initPolyMap() {
-    leafletMap = L.map($('polyMap')).setView([20, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-    }).addTo(leafletMap);
-
-    leafletMap.on('click', function (e) {
-      if (!drawingActive) return;
-      addVertex(e.latlng);
+  function findNearbyVertexIndex(lat, lng, tolerance) {
+    var best = -1, bestDist = Infinity;
+    corners.forEach(function (c, i) {
+      var d = Math.abs(c.lat - lat) + Math.abs(c.lng - lng);
+      if (d < tolerance && d < bestDist) { bestDist = d; best = i; }
     });
+    return best === -1 ? null : best;
+  }
 
-    service.map.getBounds().then(function (bounds) {
-      try {
-        leafletMap.fitBounds([[bounds.sw.lat, bounds.sw.lng], [bounds.ne.lat, bounds.ne.lng]]);
-      } catch (e) { /* keep default view */ }
-    }).catch(function () { /* keep default view */ });
+  function handleMapClick(lat, lng, bounds) {
+    if (!drawingActive) return;
 
-    setTimeout(function () { leafletMap.invalidateSize(); }, 200);
+    var tolerance = bounds ? Math.max((bounds.ne.lng - bounds.sw.lng) / 40, 0.0001) : 0.0005;
+
+    if (selectedIndex !== null) {
+      corners[selectedIndex] = { lat: lat, lng: lng };
+      selectedIndex = null;
+      redrawVertexMarkers();
+      redrawPolygonOutline();
+      updatePolygonHint();
+      clearResults();
+      return;
+    }
+
+    var hit = findNearbyVertexIndex(lat, lng, tolerance);
+    if (hit !== null) {
+      selectedIndex = hit;
+      redrawVertexMarkers();
+      updatePolygonHint();
+      return;
+    }
+
+    corners.push({ lat: lat, lng: lng });
+    redrawVertexMarkers();
+    redrawPolygonOutline();
+    updatePolygonHint();
+    clearResults();
   }
 
   function setDrawingActive(active) {
     drawingActive = active;
+    selectedIndex = null;
     var btn = $('toggleDrawBtn');
     btn.textContent = active ? 'Desactivar selección de puntos' : 'Activar selección de puntos';
     btn.classList.toggle('active', active);
-    $('polyMap').classList.toggle('drawing-active', active);
+    redrawVertexMarkers();
+    updatePolygonHint();
   }
 
-  function redrawPolygonLine() {
-    if (polygonLine) {
-      leafletMap.removeLayer(polygonLine);
-      polygonLine = null;
+  function redrawVertexMarkers() {
+    vertexMarkers.forEach(function (m) { m.remove(); });
+    vertexMarkers = corners.map(function (c, i) {
+      var isSelected = i === selectedIndex;
+      return service.canvas.circle({ lat: c.lat, lng: c.lng }, isSelected ? 10 : 8, 60)
+        .change({ fill: isSelected ? '#e0a92d' : '#2f6fed', stroke: '#fff', 'stroke-width': 2, r: isSelected ? 10 : 8 });
+    });
+  }
+
+  function redrawPolygonOutline() {
+    if (polygonLayer) {
+      polygonLayer.remove();
+      polygonLayer = null;
     }
     if (corners.length < 2) return;
-    var latlngs = corners.map(function (c) { return [c.lat, c.lng]; });
-    polygonLine = L.polygon(latlngs, {
-      color: '#2f6fed',
-      weight: 2,
-      fillOpacity: corners.length >= MIN_CORNERS ? 0.12 : 0.03
-    }).addTo(leafletMap);
+
+    var segs = corners.map(function (c, i) {
+      return { type: i === 0 ? 'M' : 'L', points: [{ lat: c.lat, lng: c.lng }] };
+    });
+    segs.push({ type: 'Z' });
+
+    var complete = corners.length >= MIN_CORNERS;
+    polygonLayer = service.canvas.path(segs, 40)
+      .change({
+        fill: '#2f6fed',
+        stroke: '#2f6fed',
+        'stroke-width': 2,
+        'fill-opacity': complete ? 0.12 : 0.03
+      });
   }
 
-  function updatePolygonHint() {
-    $('polygonHint').textContent = 'Puntos: ' + corners.length + ' (mínimo ' + MIN_CORNERS + ')';
-    $('searchBtn').disabled = corners.length < MIN_CORNERS;
-  }
-
-  function addVertex(latlng) {
-    var corner = { lat: latlng.lat, lng: latlng.lng };
-    corners.push(corner);
-
-    var marker = L.marker(latlng, { draggable: true }).addTo(leafletMap);
-
-    marker.on('drag', function (e) {
-      var idx = vertexMarkers.indexOf(marker);
-      if (idx === -1) return;
-      var ll = e.target.getLatLng();
-      corners[idx] = { lat: ll.lat, lng: ll.lng };
-      redrawPolygonLine();
-    });
-
-    marker.on('dragend', function () {
-      clearResults();
-      updatePolygonHint();
-    });
-
-    marker.on('click', function (e) {
-      L.DomEvent.stopPropagation(e);
-      var idx = vertexMarkers.indexOf(marker);
-      if (idx === -1) return;
-      corners.splice(idx, 1);
-      vertexMarkers.splice(idx, 1);
-      leafletMap.removeLayer(marker);
-      redrawPolygonLine();
-      updatePolygonHint();
-      clearResults();
-    });
-
-    vertexMarkers.push(marker);
-    redrawPolygonLine();
+  function removeVertex(index) {
+    corners.splice(index, 1);
+    if (selectedIndex === index) selectedIndex = null;
+    redrawVertexMarkers();
+    redrawPolygonOutline();
     updatePolygonHint();
     clearResults();
   }
 
   function undoLastVertex() {
     if (!corners.length) return;
-    corners.pop();
-    var marker = vertexMarkers.pop();
-    if (marker) leafletMap.removeLayer(marker);
-    redrawPolygonLine();
-    updatePolygonHint();
-    clearResults();
+    removeVertex(corners.length - 1);
   }
 
   function resetPolygon() {
     corners = [];
-    vertexMarkers.forEach(function (m) { leafletMap.removeLayer(m); });
-    vertexMarkers = [];
-    if (polygonLine) {
-      leafletMap.removeLayer(polygonLine);
-      polygonLine = null;
-    }
+    selectedIndex = null;
+    redrawVertexMarkers();
+    redrawPolygonOutline();
     updatePolygonHint();
     clearResults();
+  }
+
+  function renderCornerList() {
+    var list = $('cornerList');
+    list.innerHTML = '';
+    corners.forEach(function (c, i) {
+      var row = document.createElement('div');
+      row.className = 'corner-row' + (i === selectedIndex ? ' selected' : '');
+
+      var label = document.createElement('span');
+      label.textContent = (i + 1) + '. ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
+      row.appendChild(label);
+
+      var actions = document.createElement('span');
+
+      var moveBtn = document.createElement('button');
+      moveBtn.type = 'button';
+      moveBtn.className = 'mini-btn';
+      moveBtn.textContent = i === selectedIndex ? 'Cancelar' : 'Mover';
+      moveBtn.addEventListener('click', function () {
+        if (!drawingActive) return;
+        selectedIndex = (selectedIndex === i) ? null : i;
+        redrawVertexMarkers();
+        renderCornerList();
+      });
+      actions.appendChild(moveBtn);
+
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'mini-btn';
+      removeBtn.textContent = 'Quitar';
+      removeBtn.addEventListener('click', function () { removeVertex(i); });
+      actions.appendChild(removeBtn);
+
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  }
+
+  function updatePolygonHint() {
+    renderCornerList();
+    if (selectedIndex !== null) {
+      $('polygonHint').textContent = 'Punto ' + (selectedIndex + 1) + ' seleccionado: hacé click en el mapa para moverlo ahí.';
+    } else {
+      $('polygonHint').textContent = 'Puntos: ' + corners.length + ' (mínimo ' + MIN_CORNERS + ')';
+    }
+    $('searchBtn').disabled = corners.length < MIN_CORNERS;
   }
 
   // ---- Search -------------------------------------------------------------
@@ -430,6 +472,25 @@ geotab.addin.zoneExport = function (elt, service) {
   $('exportKmlBtn').addEventListener('click', exportKml);
   $('copyKmlBtn').addEventListener('click', copyKml);
 
-  initPolyMap();
+  // service.events 'click' carries data.location = {lat, lng} for clicks on the map
+  // (including plain map background, not just entities). If a click lands exactly on
+  // an existing zone/device shape already rendered by MyGeotab itself, location may be
+  // missing — in that case we just ignore the click (user can click a slightly
+  // different spot).
+  service.events.attach('click', function (data) {
+    if (!drawingActive) return;
+    var loc = data && data.location;
+    if (!loc || loc.lat === undefined || loc.lat === null) return;
+    var lat = loc.lat;
+    var lng = loc.lng !== undefined ? loc.lng : loc.lon;
+    if (lng === undefined || lng === null) return;
+
+    service.map.getBounds().then(function (bounds) {
+      handleMapClick(lat, lng, bounds);
+    }).catch(function () {
+      handleMapClick(lat, lng, null);
+    });
+  });
+
   updatePolygonHint();
 };

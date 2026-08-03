@@ -60,17 +60,6 @@ button:disabled { background: #b7c3d6; cursor: default; }
   gap: 6px;
 }
 
-#polyMap {
-  height: 260px;
-  border: 1px solid #dcdfe3;
-  border-radius: 4px;
-  margin-bottom: 8px;
-}
-
-#polyMap.drawing-active {
-  cursor: crosshair;
-}
-
 button.active {
   background: #1a9c4a;
 }
@@ -78,6 +67,41 @@ button.active {
 button.active:hover {
   background: #157a3a;
 }
+
+.corner-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.corner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f4f5f7;
+  border: 1px solid #e3e6ea;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 11px;
+}
+
+.corner-row.selected {
+  background: #fdf1d9;
+  border-color: #e0a92d;
+}
+
+.mini-btn {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  background: #e3e6ea;
+  color: #333;
+}
+
+.mini-btn:hover { background: #d2d7de; }
+
+.mini-btn + .mini-btn { margin-left: 4px; }
 
 .chip-list {
   display: flex;
