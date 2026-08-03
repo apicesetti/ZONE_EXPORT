@@ -4,20 +4,22 @@
 <meta charset="UTF-8" />
 <title>Exportar geocercas por polígono</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
 
   <section class="panel">
-    <h2>1. Definí el polígono (4 esquinas)</h2>
-    <p class="hint">Hacé click sobre el mapa en el punto que querés usar como esquina (el círculo rojo sigue al cursor). Repetí 4 veces. Si el click no se registra, pasá el cursor por el punto exacto y usá "Fijar esquina en el cursor".</p>
+    <h2>1. Definí el polígono</h2>
+    <p class="hint">Activá la selección y hacé click en el mapa de abajo para agregar puntos (mínimo 3). Arrastrá un punto para moverlo, o hacé click sobre un punto para quitarlo.</p>
+    <div id="polyMap"></div>
     <div class="toolbar">
-      <button id="addCornerBtn" type="button">Fijar esquina en el cursor</button>
+      <button id="toggleDrawBtn" type="button">Activar selección de puntos</button>
+      <button id="undoPointBtn" type="button">Quitar último punto</button>
       <button id="resetBtn" type="button">Reiniciar polígono</button>
     </div>
-    <div id="cornerList" class="corner-list"></div>
-    <p class="hint" id="polygonHint">Esquinas: 0 / 4</p>
+    <p class="hint" id="polygonHint">Puntos: 0 (mínimo 3)</p>
   </section>
 
   <section class="panel">
@@ -51,6 +53,7 @@
   </section>
 
 </div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

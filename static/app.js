@@ -1,21 +1,20 @@
 geotab.addin.zoneExport = function (elt, service) {
   'use strict';
 
-  var MAX_CORNERS = 4;
+  var MIN_CORNERS = 3;
   var ZONE_RESULTS_LIMIT = 1000;
 
   function $(id) { return elt.querySelector('#' + id); }
 
-  var corners = [];          // [{lat, lng}, ...] up to MAX_CORNERS
-  var cornerMarkers = [];    // canvas circle elements, same order as corners
-  var polygonLayer = null;   // canvas path element for the corner polygon
-  var pointerCrosshair = null;
-  var lastPointer = null;    // {lat, lng} of the last known cursor position over the map
-  var pointerRedrawPending = false;
+  var corners = [];          // [{lat, lng}, ...], polygon vertices in click order
+  var vertexMarkers = [];    // Leaflet draggable markers, same order as corners
+  var polygonLine = null;    // Leaflet polygon layer for the corner polygon
+  var drawingActive = false;
+  var leafletMap = null;
 
   var zoneTypesById = {};
   var matchedZones = [];
-  var resultZoneLayers = []; // canvas path elements for matched-zone overlays
+  var resultZoneLayers = []; // canvas path elements (on the real Geotab map) for matched-zone overlays
 
   // ---- Helpers --------------------------------------------------------
 
@@ -73,108 +72,119 @@ geotab.addin.zoneExport = function (elt, service) {
     return { lat: sumLat / pts.length, lng: sumLng / pts.length };
   }
 
-  // ---- Pointer crosshair (tracks the cursor over the map so clicks can drop a corner) ---
+  // ---- Polygon editor (own embedded Leaflet map — draggable, click-to-add/remove) ----
+  //
+  // The Geotab map add-in API (service.map / service.events) only exposes screen-pixel
+  // coordinates for clicks/moves over the real MyGeotab map, with no way to convert those
+  // to lat/lng and no drag support on drawn elements. So the interactive polygon editor
+  // runs on our own Leaflet map inside the add-in panel, where we have full mouse control.
+  // The real Geotab map (via service.canvas) is only used afterwards, to show the zones
+  // found inside the finished polygon — that only needs to draw shapes at known lat/lng.
 
-  function redrawPointerCrosshair() {
-    if (pointerCrosshair) {
-      pointerCrosshair.remove();
-      pointerCrosshair = null;
-    }
-    if (!lastPointer) return;
-    pointerCrosshair = service.canvas.circle({ lat: lastPointer.lat, lng: lastPointer.lng }, 6, 90)
-      .change({ fill: 'rgba(220,20,60,0.25)', stroke: '#dc143c', 'stroke-width': 2, r: 6 });
-  }
+  function initPolyMap() {
+    leafletMap = L.map($('polyMap')).setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(leafletMap);
 
-  function schedulePointerCrosshairRedraw() {
-    if (pointerRedrawPending) return;
-    pointerRedrawPending = true;
-    requestAnimationFrame(function () {
-      pointerRedrawPending = false;
-      redrawPointerCrosshair();
-    });
-  }
-
-  // ---- Polygon corners --------------------------------------------------
-
-  function renderCorners() {
-    var list = $('cornerList');
-    list.innerHTML = '';
-    corners.forEach(function (c, i) {
-      var row = document.createElement('div');
-      row.className = 'corner-row';
-
-      var label = document.createElement('span');
-      label.textContent = (i + 1) + '. ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
-      row.appendChild(label);
-
-      var removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'mini-btn';
-      removeBtn.textContent = 'Quitar';
-      removeBtn.addEventListener('click', function () { removeCorner(i); });
-      row.appendChild(removeBtn);
-
-      list.appendChild(row);
+    leafletMap.on('click', function (e) {
+      if (!drawingActive) return;
+      addVertex(e.latlng);
     });
 
-    $('polygonHint').textContent = 'Esquinas: ' + corners.length + ' / ' + MAX_CORNERS;
-    $('addCornerBtn').disabled = corners.length >= MAX_CORNERS;
-    $('searchBtn').disabled = corners.length !== MAX_CORNERS;
+    service.map.getBounds().then(function (bounds) {
+      try {
+        leafletMap.fitBounds([[bounds.sw.lat, bounds.sw.lng], [bounds.ne.lat, bounds.ne.lng]]);
+      } catch (e) { /* keep default view */ }
+    }).catch(function () { /* keep default view */ });
+
+    setTimeout(function () { leafletMap.invalidateSize(); }, 200);
   }
 
-  function redrawCornerMarkers() {
-    cornerMarkers.forEach(function (m) { m.remove(); });
-    cornerMarkers = corners.map(function (c) {
-      return service.canvas.circle({ lat: c.lat, lng: c.lng }, 8, 60)
-        .change({ fill: '#2f6fed', stroke: '#fff', 'stroke-width': 2, r: 8 });
-    });
+  function setDrawingActive(active) {
+    drawingActive = active;
+    var btn = $('toggleDrawBtn');
+    btn.textContent = active ? 'Desactivar selección de puntos' : 'Activar selección de puntos';
+    btn.classList.toggle('active', active);
+    $('polyMap').classList.toggle('drawing-active', active);
   }
 
-  function redrawPolygonOutline() {
-    if (polygonLayer) {
-      polygonLayer.remove();
-      polygonLayer = null;
+  function redrawPolygonLine() {
+    if (polygonLine) {
+      leafletMap.removeLayer(polygonLine);
+      polygonLine = null;
     }
     if (corners.length < 2) return;
-
-    var segs = corners.map(function (c, i) {
-      return { type: i === 0 ? 'M' : 'L', points: [{ lat: c.lat, lng: c.lng }] };
-    });
-    segs.push({ type: 'Z' });
-
-    var complete = corners.length === MAX_CORNERS;
-    polygonLayer = service.canvas.path(segs, 40)
-      .change({
-        fill: '#2f6fed',
-        stroke: '#2f6fed',
-        'stroke-width': 2,
-        'fill-opacity': complete ? 0.12 : 0.03
-      });
+    var latlngs = corners.map(function (c) { return [c.lat, c.lng]; });
+    polygonLine = L.polygon(latlngs, {
+      color: '#2f6fed',
+      weight: 2,
+      fillOpacity: corners.length >= MIN_CORNERS ? 0.12 : 0.03
+    }).addTo(leafletMap);
   }
 
-  function addCornerAtPointer() {
-    if (corners.length >= MAX_CORNERS) return;
-    if (!lastPointer) return; // cursor hasn't moved over the map yet
-    corners.push({ lat: lastPointer.lat, lng: lastPointer.lng });
-    renderCorners();
-    redrawCornerMarkers();
-    redrawPolygonOutline();
+  function updatePolygonHint() {
+    $('polygonHint').textContent = 'Puntos: ' + corners.length + ' (mínimo ' + MIN_CORNERS + ')';
+    $('searchBtn').disabled = corners.length < MIN_CORNERS;
+  }
+
+  function addVertex(latlng) {
+    var corner = { lat: latlng.lat, lng: latlng.lng };
+    corners.push(corner);
+
+    var marker = L.marker(latlng, { draggable: true }).addTo(leafletMap);
+
+    marker.on('drag', function (e) {
+      var idx = vertexMarkers.indexOf(marker);
+      if (idx === -1) return;
+      var ll = e.target.getLatLng();
+      corners[idx] = { lat: ll.lat, lng: ll.lng };
+      redrawPolygonLine();
+    });
+
+    marker.on('dragend', function () {
+      clearResults();
+      updatePolygonHint();
+    });
+
+    marker.on('click', function (e) {
+      L.DomEvent.stopPropagation(e);
+      var idx = vertexMarkers.indexOf(marker);
+      if (idx === -1) return;
+      corners.splice(idx, 1);
+      vertexMarkers.splice(idx, 1);
+      leafletMap.removeLayer(marker);
+      redrawPolygonLine();
+      updatePolygonHint();
+      clearResults();
+    });
+
+    vertexMarkers.push(marker);
+    redrawPolygonLine();
+    updatePolygonHint();
     clearResults();
   }
 
-  function removeCorner(index) {
-    corners.splice(index, 1);
-    renderCorners();
-    redrawCornerMarkers();
-    redrawPolygonOutline();
+  function undoLastVertex() {
+    if (!corners.length) return;
+    corners.pop();
+    var marker = vertexMarkers.pop();
+    if (marker) leafletMap.removeLayer(marker);
+    redrawPolygonLine();
+    updatePolygonHint();
     clearResults();
   }
 
   function resetPolygon() {
     corners = [];
-    renderCorners();
-    redrawCornerMarkers();
-    redrawPolygonOutline();
+    vertexMarkers.forEach(function (m) { leafletMap.removeLayer(m); });
+    vertexMarkers = [];
+    if (polygonLine) {
+      leafletMap.removeLayer(polygonLine);
+      polygonLine = null;
+    }
+    updatePolygonHint();
     clearResults();
   }
 
@@ -186,13 +196,13 @@ geotab.addin.zoneExport = function (elt, service) {
     matchedZones = [];
     $('resultsSection').style.display = 'none';
     $('exportSection').style.display = 'none';
-    $('searchStatus').textContent = corners.length === MAX_CORNERS
+    $('searchStatus').textContent = corners.length >= MIN_CORNERS
       ? 'Listo para buscar.'
-      : 'Completá el polígono para habilitar la búsqueda.';
+      : 'Completá el polígono (mínimo ' + MIN_CORNERS + ' puntos) para habilitar la búsqueda.';
   }
 
   function runSearch() {
-    if (corners.length !== MAX_CORNERS) return;
+    if (corners.length < MIN_CORNERS) return;
 
     $('searchStatus').textContent = 'Buscando geocercas...';
     resultZoneLayers.forEach(function (l) { l.remove(); });
@@ -411,7 +421,8 @@ geotab.addin.zoneExport = function (elt, service) {
 
   // ---- Wiring ------------------------------------------------------------
 
-  $('addCornerBtn').addEventListener('click', addCornerAtPointer);
+  $('toggleDrawBtn').addEventListener('click', function () { setDrawingActive(!drawingActive); });
+  $('undoPointBtn').addEventListener('click', undoLastVertex);
   $('resetBtn').addEventListener('click', resetPolygon);
   $('searchBtn').addEventListener('click', runSearch);
   $('selectAllZonesBtn').addEventListener('click', function () { setAllZoneCheckboxes(true); });
@@ -419,17 +430,6 @@ geotab.addin.zoneExport = function (elt, service) {
   $('exportKmlBtn').addEventListener('click', exportKml);
   $('copyKmlBtn').addEventListener('click', copyKml);
 
-  // The map API doesn't fire 'click' with coordinates for empty map area, only for
-  // entities (zone/device/route/...). So we track the cursor position continuously via
-  // 'move' (coordinates in map space: x = lng, y = lat) and use the last known position
-  // whenever a 'click' arrives, regardless of what (if anything) was clicked on.
-  service.events.attach('move', function (e) {
-    lastPointer = { lat: e.y, lng: e.x };
-    schedulePointerCrosshairRedraw();
-  });
-  service.events.attach('click', function () {
-    addCornerAtPointer();
-  });
-
-  renderCorners();
+  initPolyMap();
+  updatePolygonHint();
 };

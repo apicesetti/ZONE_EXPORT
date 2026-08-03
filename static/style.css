@@ -60,33 +60,24 @@ button:disabled { background: #b7c3d6; cursor: default; }
   gap: 6px;
 }
 
-.corner-list {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.corner-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #f4f5f7;
-  border: 1px solid #e3e6ea;
+#polyMap {
+  height: 260px;
+  border: 1px solid #dcdfe3;
   border-radius: 4px;
-  padding: 4px 8px;
-  font-family: Consolas, Menlo, monospace;
-  font-size: 11px;
+  margin-bottom: 8px;
 }
 
-.mini-btn {
-  padding: 2px 8px;
-  font-size: 10.5px;
-  background: #e3e6ea;
-  color: #333;
+#polyMap.drawing-active {
+  cursor: crosshair;
 }
 
-.mini-btn:hover { background: #d2d7de; }
+button.active {
+  background: #1a9c4a;
+}
+
+button.active:hover {
+  background: #157a3a;
+}
 
 .chip-list {
   display: flex;
