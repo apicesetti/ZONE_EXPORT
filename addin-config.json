@@ -1,17 +1,16 @@
 {
-    "id": "aCesettiZoneExport01",
     "name": "Exportar geocercas por polígono - Cesetti",
     "supportEmail": "mt@cesetti.com.ar",
     "version": "1.0.0",
     "items": [
         {
-            "url": "https://apicesetti.github.io/ZONE_EXPORT/static/index.html",
-            "path": "ActivityLink",
-            "menuName": {
-                "es": "Exportar geocercas por polígono"
-            },
-            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNTU1IiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik00IDYgMTggNCAyMCAxNiA2IDIwIFoiLz48Y2lyY2xlIGN4PSI0IiBjeT0iNiIgcj0iMS44IiBmaWxsPSIjNTU1Ii8+PGNpcmNsZSBjeD0iMTgiIGN5PSI0IiByPSIxLjgiIGZpbGw9IiM1NTUiLz48Y2lyY2xlIGN4PSIyMCIgY3k9IjE2IiByPSIxLjgiIGZpbGw9IiM1NTUiLz48Y2lyY2xlIGN4PSI2IiBjeT0iMjAiIHI9IjEuOCIgZmlsbD0iIzU1NSIvPjwvc3ZnPg=="
+            "page": "map",
+            "title": "Exportar geocercas",
+            "noView": false,
+            "mapScript": {
+                "url": "https://apicesetti.github.io/ZONE_EXPORT/static/index.html"
+            }
         }
     ],
-    "files": {}
+    "isSigned": false
 }
